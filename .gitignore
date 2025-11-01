@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+
+# Local environment variables
+.env
+
+# Runtime-generated folders
+uploads/
+outputs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / System files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
