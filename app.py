@@ -126,12 +126,10 @@ def parse_keywords(s):
     s = normalize(s)
     if not s:
         return []
-    # split by comma (English/Persian) or multiple spaces
     parts = re.split(r"[,\u060C]+|\s{2,}", s)
     out = []
     for p in parts:
         out.extend([x.strip() for x in p.split() if x.strip()])
-    # de-dup while preserving order
     seen = set()
     dedup = []
     for w in out:
@@ -157,13 +155,6 @@ def keyword_hits_in_text(text, keywords):
     return sum(1 for kw in keywords if kw.lower() in t) if t and keywords else 0
 
 def filter_by_keywords(df, keywords, text_cols, min_mode="auto"):
-    """
-    Keep rows that reach a minimum keyword hit threshold.
-    - 'any': at least 1 hit
-    - 'all': require all keywords
-    - 'auto': if <3 keywords → 1 hit; else ceil(60% of keywords)
-    Adds __kw_hits column with total hits.
-    """
     df = df.copy()
     if not keywords:
         df["__kw_hits"] = 0
@@ -229,7 +220,6 @@ def build_prompt(header_cols, df_csv, job_description, top_n, prefer_kw=False):
     extra = ""
     if prefer_kw and "__kw_hits" in df_csv:
         extra = "\n- اگر ستون __kw_hits وجود دارد، به امتیاز کلیدواژه وزن بده و افراد با امتیاز بالاتر را ترجیح بده."
-    # strict formatting instructions to avoid parser issues
     return f"""
 شما یک متخصص منابع انسانی هستید.
 شرح شغل:
@@ -253,57 +243,34 @@ CSV داده‌های ورودی:
 """.strip()
 
 def try_parse_csv(text, expected_first_col):
-    """
-    Accept typical LLM outputs:
-    - stray prose above/below csv
-    - code fences ```...```
-    - wrong delimiter (; or | or \t)
-    - extra blank lines / markdown table bars
-    Returns a DataFrame or raises ValueError.
-    """
     raw = text.strip()
-
-    # strip code fences/backticks if present
     raw = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", raw, flags=re.MULTILINE)
-
-    # keep only the largest block(s)
     blocks = re.split(r"\n\s*\n", raw)
     blocks = sorted(blocks, key=lambda b: len(b), reverse=True)
-
     delims = [",", ";", "|", "\t"]
-    last_err = None
 
     for block in blocks:
         lines = [l for l in block.splitlines() if l.strip()]
         if len(lines) < 2:
             continue
-
-        # Find start where expected_first_col appears in the line (header line)
         starts = [i for i, ln in enumerate(lines) if expected_first_col in ln]
         candidates = [lines[min(starts):]] if starts else [lines]
 
         for cand in candidates:
-            candidate_text = "\n".join(cand)
-            # normalize newlines
-            candidate_text = candidate_text.replace("\r\n", "\n").replace("\r", "\n")
-
-            # clean markdown pipes and comments
+            candidate_text = "\n".join(cand).replace("\r\n", "\n").replace("\r", "\n")
             cleaned = "\n".join(
                 ln.strip("| ").rstrip("| ").strip()
                 for ln in candidate_text.splitlines()
                 if ln.strip() and not ln.strip().startswith("#")
             )
-
             for d in delims:
                 try:
                     df = pd.read_csv(io.StringIO(cleaned), sep=d, engine="python")
                     first = df.columns[0].strip()
                     if expected_first_col.strip() in first or first in expected_first_col.strip():
                         return df
-                except Exception as e:
-                    last_err = e
+                except Exception:
                     continue
-
     raise ValueError("CSV parse failed")
 
 def fallback_rank(df, job_description, top_n):
@@ -336,19 +303,15 @@ def query_gemma(df, job_description, top_n, prefer_kw=False):
             options={"temperature": 0.1}
         )
         text = (resp["message"]["content"] or "").strip()
-
-        # If model used Persian comma '،' as delimiter in header, map to ','
         header_line = text.splitlines()[0] if text else ""
         if "،" in header_line and "," not in header_line:
             text = text.replace("،", ",")
-
         out = try_parse_csv(text, expected_first_col=cols_kept[0])
 
         if "دلیل انتخاب" not in out.columns:
             out["دلیل انتخاب"] = [
                 "این فرد بر اساس ارزیابی مدل برای نقش مورد نظر مناسب تشخیص داده شد." for _ in out.index
             ]
-
         return (
             out.dropna(how="all")
                .replace("nan", "")
@@ -379,11 +342,15 @@ def save_with_summary(df, summary_dict, output_path):
     wb.save(output_path)
 
 # ------------------------------------------------
-# Voice → NLP parsing helpers & route
+# Voice → NLP helpers
 # ------------------------------------------------
 def map_age_bucket(lo, hi):
     if lo is None and hi is None:
         return "any"
+    if lo is not None and hi is None:
+        hi = lo
+    if hi is not None and lo is None:
+        lo = hi
     lo = lo or 0
     hi = hi or 200
     mid = (lo + hi) / 2
@@ -399,6 +366,10 @@ def map_age_bucket(lo, hi):
 def map_exp_bucket(lo, hi):
     if lo is None and hi is None:
         return "any"
+    if lo is not None and hi is None:
+        hi = lo
+    if hi is not None and lo is None:
+        lo = hi
     lo = lo or 0
     hi = hi or 200
     ranges = [("-1",0,1), ("1-3",1,3), ("3-6",3,6), ("6-10",6,10), ("10-20",10,20), ("20+",20,200)]
@@ -419,6 +390,64 @@ def extract_json_block(text):
         raise ValueError("No JSON block found")
     return json.loads(m.group(0))
 
+# --- NEW: regex extraction that handles ranges AND single values for age/experience
+def regex_extract_age_exp_city_gender_military(utter):
+    s = normalize_digits(utter)
+    # Age range: "سن 25 تا 32" / "۲۵ تا ۳۲ سال"
+    age_lo = age_hi = None
+    m = re.search(r"(?:سن\s*(?:بین)?\s*)?(\d{1,3})\s*(?:تا|-)\s*(\d{1,3})\s*(?:سال(?:ه)?)?", s)
+    if m:
+        age_lo, age_hi = int(m.group(1)), int(m.group(2))
+    else:
+        # Single age: "28 ساله" / "سن 28" / "28 سال سن"
+        m = re.search(r"(?:سن\s*)?(\d{1,3})\s*(?:سال(?:ه)?|ساله)?\s*(?:سن)?", s)
+        if m:
+            v = int(m.group(1))
+            # try to avoid catching exp numbers: ensure there's "سن" or "ساله"
+            if re.search(r"(سن|ساله|سالِه)", s) or ("ساله" in s):
+                age_lo = age_hi = v
+            else:
+                # Heuristic: if "سابقه" appears near, treat as exp, not age
+                pass
+
+    # Experience range: "سابقه 3 تا 6" / "سابقه کاری ۳ تا ۶ سال"
+    exp_lo = exp_hi = None
+    m = re.search(r"(?:سابقه(?:\s*کاری)?|تجربه)\s*(?:حداقل|بیش از|کمتر از|حداکثر)?\s*(\d{1,2})\s*(?:تا|-)\s*(\d{1,2})\s*سال", s)
+    if m:
+        exp_lo, exp_hi = float(m.group(1)), float(m.group(2))
+    else:
+        # Single experience: "۴ سال سابقه" / "سابقه 4 سال" / "تجربه 4 سال"
+        m = re.search(r"(?:سابقه(?:\s*کاری)?|تجربه)\s*(?:حداقل|بیش از|کمتر از|حداکثر)?\s*(\d{1,2})\s*سال", s)
+        if m:
+            exp_lo = exp_hi = float(m.group(1))
+        else:
+            # Pattern like "... 4 سال ..." with word سابقه right after
+            m = re.search(r"(\d{1,2})\s*سال(?:ه)?\s*(?:سابقه(?:\s*کاری)?|تجربه)", s)
+            if m:
+                exp_lo = exp_hi = float(m.group(1))
+
+    # City
+    city = "any"
+    m = re.search(r"(?:در|توی)\s+([آ-یA-Za-z]+)", s)
+    if m:
+        city = m.group(1)
+
+    # Gender
+    gender = "همه"
+    if re.search(r"(خانم|زن)", s): gender = "زن"
+    if re.search(r"(آقا|مرد)", s): gender = "مرد"
+
+    # Military
+    military = "همه"
+    if re.search(r"(معاف|ندارد)", s): military = "ندارد"
+    if re.search(r"(پایان خدمت|کارت|دارد)", s): military = "دارد"
+    if re.search(r"(فرقی نمی.?کنه)", s): military = "همه"
+
+    return age_lo, age_hi, exp_lo, exp_hi, city, gender, military
+
+# ------------------------------------------------
+# Voice → NLP route
+# ------------------------------------------------
 @app.route("/nlp/parse", methods=["POST"])
 def nlp_parse():
     data = request.get_json(silent=True) or {}
@@ -444,7 +473,7 @@ def nlp_parse():
     user_text = f"متن کارفرما:\n{utter}"
 
     parsed = None
-    # Try LLM first
+    # 1) Try LLM
     try:
         resp = ollama.chat(
             model="gemma3:1b",
@@ -467,43 +496,45 @@ def nlp_parse():
             "top_candidates": obj.get("top_candidates") or None
         }
     except Exception:
-        # Fallback regex parser (digits already normalized)
-        s = utter
+        parsed = None
 
-        age_lo = age_hi = None
-        m = re.search(r"سن\s*(?:بین)?\s*(\d{1,3})\s*(?:تا|-)\s*(\d{1,3})", s)
-        if m:
-            age_lo, age_hi = int(m.group(1)), int(m.group(2))
+    # 2) Always run regex extractor, then fill missing/any from it
+    age_lo, age_hi, exp_lo, exp_hi, city_rx, gender_rx, military_rx = regex_extract_age_exp_city_gender_military(utter)
 
-        exp_lo = exp_hi = None
-        m = re.search(r"سابقه(?:\s*کاری)?\s*(\d{1,2})\s*(?:تا|-)\s*(\d{1,2})", s)
-        if m:
-            exp_lo, exp_hi = float(m.group(1)), float(m.group(2))
-
-        city = "any"
-        m = re.search(r"(?:در|توی)\s+([آ-یA-Za-z]+)", s)
-        if m:
-            city = m.group(1)
-
-        gender = "همه"
-        if "خانم" in s or "زن" in s: gender = "زن"
-        if "آقا" in s or "مرد" in s: gender = "مرد"
-
-        military = "همه"
-        if "معاف" in s or "ندارد" in s: military = "ندارد"
-        if "پایان خدمت" in s or "کارت" in s or "دارد" in s: military = "دارد"
-        if "فرقی نمی‌کنه" in s or "فرقی نمیکنه" in s: military = "همه"
-
+    # If LLM failed, seed a default dict first
+    if parsed is None:
         parsed = {
             "job_description": utter,
-            "age_range": map_age_bucket(age_lo, age_hi),
-            "exp_range": map_exp_bucket(exp_lo, exp_hi),
-            "city": city,
-            "gender_filter": gender,
-            "military_filter": military,
+            "age_range": "any",
+            "exp_range": "any",
+            "city": "any",
+            "gender_filter": "همه",
+            "military_filter": "همه",
             "must_keywords": [],
             "top_candidates": None
         }
+
+    # Fill-in/override when LLM missed it
+    if parsed.get("age_range", "any") == "any":
+        parsed["age_range"] = map_age_bucket(age_lo, age_hi)
+    # Handle JSON numeric hints like {"experience_years": 4}
+    exp_hint = None
+    try:
+        exp_hint = float(parsed.get("experience_years")) if parsed.get("experience_years") is not None else None
+    except Exception:
+        exp_hint = None
+    if exp_hint is not None and parsed.get("exp_range","any") == "any":
+        parsed["exp_range"] = map_exp_bucket(exp_hint, exp_hint)
+    if parsed.get("exp_range","any") == "any":
+        parsed["exp_range"] = map_exp_bucket(exp_lo, exp_hi)
+
+    # City/Gender/Military: prefer LLM but fix if empty/any and regex has something better
+    if (not parsed.get("city")) or parsed.get("city") == "any":
+        parsed["city"] = city_rx or "any"
+    if parsed.get("gender_filter","همه") == "همه" and gender_rx != "همه":
+        parsed["gender_filter"] = gender_rx
+    if parsed.get("military_filter","همه") == "همه" and military_rx != "همه":
+        parsed["military_filter"] = military_rx
 
     # guardrails
     allowed_age = {"any","18-25","25-32","32-40","40+"}
@@ -555,7 +586,7 @@ def index():
         if must_keywords:
             text_cols = get_textual_columns(filtered_df)
             filtered_df = filter_by_keywords(filtered_df, must_keywords, text_cols, min_mode="auto")
-            prefer_kw = True  # nudge LLM to consider __kw_hits
+            prefer_kw = True
 
         # Step 3: Gemma ranking (or fallback)
         ranked = query_gemma(filtered_df, job_description, top_n, prefer_kw=prefer_kw)
