@@ -51,7 +51,7 @@ def normalize_digits(s):
 def detect_columns(df):
     name_col   = find_col(df, ["نام", "Name"]) or "نام"
     gender_col = find_col(df, ["جنس", "Gender"]) or "جنسیت"
-    mil_col    = find_col(df, ["נظام", "نظام", "خدمت", "Military"]) or "وضعیت نظام وظیفه"
+    mil_col    = find_col(df, ["نظام", "خدمت", "Military"]) or "وضعیت نظام وظیفه"
     age_col    = find_col(df, ["سن", "Age"]) or "سن"
     exp_col    = find_col(df, ["سابقه", "Experience"]) or "سابقه کار"
     city_col   = find_col(df, ["شهر", "City", "Location"]) or "شهر"
@@ -103,7 +103,6 @@ def apply_local_filters(df, cols, age_range, exp_range, city, gender_filter, mil
                   "32-40": (32, 40), "40+": (40, 200)}
         lo, hi = bounds.get(age_range, (0, 200))
         df["_AGE_"] = df[cols["age"]].apply(extract_first_int)
-        # pandas versions differ on 'inclusive'; this keeps your prior behavior
         df = df[df["_AGE_"].between(lo, hi, inclusive="both")]
         df.drop(columns=["_AGE_"], inplace=True, errors="ignore")
 
@@ -121,7 +120,7 @@ def apply_local_filters(df, cols, age_range, exp_range, city, gender_filter, mil
     return df
 
 # ------------------------------------------------
-# Keyword prefilter (NEW)
+# Keyword prefilter
 # ------------------------------------------------
 def parse_keywords(s):
     s = normalize(s)
@@ -226,43 +225,85 @@ def cap_rows_for_ai(df, job_description, max_rows=300):
     return df.head(max_rows)
 
 def build_prompt(header_cols, df_csv, job_description, top_n, prefer_kw=False):
-    # Keep column names as-is (including __kw_hits) to avoid CSV parse mismatches
     header_line = ",".join(header_cols + ["دلیل انتخاب"])
     extra = ""
     if prefer_kw and "__kw_hits" in df_csv:
         extra = "\n- اگر ستون __kw_hits وجود دارد، به امتیاز کلیدواژه وزن بده و افراد با امتیاز بالاتر را ترجیح بده."
+    # strict formatting instructions to avoid parser issues
     return f"""
 شما یک متخصص منابع انسانی هستید.
 شرح شغل:
 {job_description}
 
-لیست کاندیداها در فایل زیر آمده است.
-فقط {top_n} نفر برتر را انتخاب کن و در ستون «دلیل انتخاب» برای هر نفر یک پاراگراف حدود ۵۰ کلمه بنویس که توضیح دهد چرا این شخص در میان سایرین انتخاب شده است (براساس مهارت‌ها، تجربه، شهر، تحصیلات و ارتباط با نیاز شغل). خروجی فقط CSV باشد.{extra}
+وظیفه:
+- فقط {top_n} نفر برتر را انتخاب کن.
+- در ستون «دلیل انتخاب» برای هر نفر یک پاراگراف ~۵۰ کلمه بنویس که چرایی انتخاب را توضیح دهد (مهارت‌ها، تجربه، شهر، ارتباط با شغل).
+- خروجی باید فقط CSV خام باشد. بدون هیچ متن اضافه، بدون توضیح، بدون بلاک کد، بدون تیتر.
+- جداکننده فقط و فقط ویرگول (,) باشد. از ; یا | استفاده نکن.
+- از علامت نقل‌قول دوبل " برای فیلدهای چندکلمه‌ای استفاده کن.
+{extra}
 
-هدر مورد انتظار:
+قالب دقیق هدر (ستون‌ها به همین ترتیب و همین نام‌ها):
 {header_line}
 
-CSV داده‌ها:
+CSV داده‌های ورودی:
 {df_csv}
+
+فقط و فقط CSV نهایی را چاپ کن. هیچ متن دیگری قبل یا بعد از CSV ننویس.
 """.strip()
 
 def try_parse_csv(text, expected_first_col):
-    lines = [l for l in text.splitlines() if l.strip()]
-    try:
-        df = pd.read_csv(io.StringIO(text))
-        if df.columns[0].strip() == expected_first_col:
-            return df
-    except Exception:
-        pass
-    for i, l in enumerate(lines):
-        if expected_first_col in l.split(",")[0]:
-            block = "\n".join(lines[i:])
-            try:
-                df = pd.read_csv(io.StringIO(block))
-                if df.columns[0].strip() == expected_first_col:
-                    return df
-            except Exception:
-                pass
+    """
+    Accept typical LLM outputs:
+    - stray prose above/below csv
+    - code fences ```...```
+    - wrong delimiter (; or | or \t)
+    - extra blank lines / markdown table bars
+    Returns a DataFrame or raises ValueError.
+    """
+    raw = text.strip()
+
+    # strip code fences/backticks if present
+    raw = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", raw, flags=re.MULTILINE)
+
+    # keep only the largest block(s)
+    blocks = re.split(r"\n\s*\n", raw)
+    blocks = sorted(blocks, key=lambda b: len(b), reverse=True)
+
+    delims = [",", ";", "|", "\t"]
+    last_err = None
+
+    for block in blocks:
+        lines = [l for l in block.splitlines() if l.strip()]
+        if len(lines) < 2:
+            continue
+
+        # Find start where expected_first_col appears in the line (header line)
+        starts = [i for i, ln in enumerate(lines) if expected_first_col in ln]
+        candidates = [lines[min(starts):]] if starts else [lines]
+
+        for cand in candidates:
+            candidate_text = "\n".join(cand)
+            # normalize newlines
+            candidate_text = candidate_text.replace("\r\n", "\n").replace("\r", "\n")
+
+            # clean markdown pipes and comments
+            cleaned = "\n".join(
+                ln.strip("| ").rstrip("| ").strip()
+                for ln in candidate_text.splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            )
+
+            for d in delims:
+                try:
+                    df = pd.read_csv(io.StringIO(cleaned), sep=d, engine="python")
+                    first = df.columns[0].strip()
+                    if expected_first_col.strip() in first or first in expected_first_col.strip():
+                        return df
+                except Exception as e:
+                    last_err = e
+                    continue
+
     raise ValueError("CSV parse failed")
 
 def fallback_rank(df, job_description, top_n):
@@ -292,15 +333,22 @@ def query_gemma(df, job_description, top_n, prefer_kw=False):
         resp = ollama.chat(
             model="gemma3:1b",
             messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.2}
+            options={"temperature": 0.1}
         )
-        text = resp["message"]["content"]
+        text = (resp["message"]["content"] or "").strip()
+
+        # If model used Persian comma '،' as delimiter in header, map to ','
+        header_line = text.splitlines()[0] if text else ""
+        if "،" in header_line and "," not in header_line:
+            text = text.replace("،", ",")
+
         out = try_parse_csv(text, expected_first_col=cols_kept[0])
+
         if "دلیل انتخاب" not in out.columns:
             out["دلیل انتخاب"] = [
-                f"این فرد بر اساس ارزیابی مدل gemma3 برای نقش مورد نظر مناسب تشخیص داده شد."
-                for _ in out.index
+                "این فرد بر اساس ارزیابی مدل برای نقش مورد نظر مناسب تشخیص داده شد." for _ in out.index
             ]
+
         return (
             out.dropna(how="all")
                .replace("nan", "")
@@ -331,7 +379,7 @@ def save_with_summary(df, summary_dict, output_path):
     wb.save(output_path)
 
 # ------------------------------------------------
-# Voice → NLP parsing helpers & route (NEW)
+# Voice → NLP parsing helpers & route
 # ------------------------------------------------
 def map_age_bucket(lo, hi):
     if lo is None and hi is None:
@@ -419,7 +467,7 @@ def nlp_parse():
             "top_candidates": obj.get("top_candidates") or None
         }
     except Exception:
-        # Fallback regex parser
+        # Fallback regex parser (digits already normalized)
         s = utter
 
         age_lo = age_hi = None
@@ -509,13 +557,13 @@ def index():
             filtered_df = filter_by_keywords(filtered_df, must_keywords, text_cols, min_mode="auto")
             prefer_kw = True  # nudge LLM to consider __kw_hits
 
-        # Step 3: Gemma ranking
+        # Step 3: Gemma ranking (or fallback)
         ranked = query_gemma(filtered_df, job_description, top_n, prefer_kw=prefer_kw)
         top_candidates = ranked.to_dict(orient="records")
 
         # UI/Excel summary
         summary_data = {
-            "توضیح شغل": job_description,
+            "توضیح شغل": job_description or "—",
             "رده سنی": age_range,
             "سابقه کار": exp_range,
             "شهر": city,
