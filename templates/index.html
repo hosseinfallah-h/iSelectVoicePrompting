@@ -60,29 +60,67 @@
                 transform: rotate(360deg)
             }
         }
+
+        .hint {
+            font-size: .8rem;
+            color: #cbd5e1
+        }
     </style>
 </head>
 
 <body class="flex items-center justify-center p-4">
     <div id="particles-js"></div>
+
     <div class="glass w-full max-w-5xl p-6 sm:p-10 animate__animated animate__fadeInUp">
+        <h1 class="text-3xl sm:text-4xl font-extrabold mb-8 text-center text-pink-400">
+            📊 I-SELECT – سامانه هوشمند جذب و استخدام
+        </h1>
 
-        <h1 class="text-3xl sm:text-4xl font-extrabold mb-8 text-center text-pink-400">📊 I-SELECT – سامانه هوشمند جذب و
-            استخدام</h1>
+        <!-- Voice Capture Row -->
+        <div class="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <button type="button" id="voiceBtn"
+                class="btn-grad text-white px-6 py-2 rounded-full font-semibold flex items-center justify-center gap-2">
+                🎤 گفتار کارفرما
+            </button>
 
+            <input id="voiceText" type="text" dir="auto"
+                placeholder="اینجا آنچه گفتید ظاهر می‌شود… (مثال: «یه تعمیرکار ۲۵ تا ۳۲ سال، سابقه ۳ تا ۶، تهران»)"
+                class="flex-1 p-3 rounded-xl bg-gray-900/60 text-white border border-white/10" readonly />
+
+            <button type="button" id="fillFromVoice"
+                class="px-5 py-2 rounded-full font-semibold bg-white/10 hover:bg-white/20 border border-white/10">
+                ✨ پر کردن خودکار فرم
+            </button>
+        </div>
+        <p class="hint mb-6">
+            نکته: اگر مرورگر شما از تشخیص گفتار پشتیبانی نمی‌کند، متن را در کادر بالا تایپ کنید و «پر کردن خودکار فرم»
+            را بزنید.
+        </p>
+
+        <!-- Main Form -->
         <form id="file-upload" method="post" enctype="multipart/form-data" action="/" class="space-y-6">
             <div>
                 <label class="block mb-2 text-pink-200 font-semibold">شرح شغل مدنظر:</label>
                 <textarea name="job_description" required rows="4"
-                    class="w-full p-3 rounded-xl bg-gray-900/60 text-white border border-white/10"></textarea>
+                    class="w-full p-3 rounded-xl bg-gray-900/60 text-white border border-white/10"
+                    placeholder="مثلاً: تعمیرکار تجهیزات صنعتی با تجربه کار با PLC و نگهداری پیشگیرانه"></textarea>
+            </div>
+
+            <!-- Optional: Must Keywords (hard requirements) -->
+            <div>
+                <label class="block mb-2 text-pink-200 font-semibold">نیازمندی‌ها (کلمات کلیدی ضروری):</label>
+                <input type="text" name="must_keywords" placeholder="مثلاً: PLC, نگهداری پیشگیرانه, برق صنعتی"
+                    class="w-full p-3 rounded-xl bg-gray-900/60 text-white border border-white/10" />
+                <p class="hint mt-1">کلمات را با کاما جدا کنید. فقط رزومه‌هایی که به این نیازمندی‌ها می‌خورند وارد
+                    مرحلهٔ هوش‌مصنوعی می‌شوند.</p>
             </div>
 
             <div class="grid md:grid-cols-2 gap-6">
                 <div>
                     <label class="block mb-2 text-pink-200 font-semibold">فایل Excel رزومه‌ها:</label>
                     <input type="file" name="excel_file" accept=".xlsx,.xls" required class="w-full file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0
-                   file:bg-pink-500 file:text-white hover:file:bg-pink-400
-                   bg-gray-900/60 text-gray-200 rounded-xl border border-white/10" />
+                        file:bg-pink-500 file:text-white hover:file:bg-pink-400
+                        bg-gray-900/60 text-gray-200 rounded-xl border border-white/10" />
                 </div>
 
                 <div>
@@ -149,6 +187,7 @@
                         <option value="زن">زن</option>
                     </select>
                 </div>
+
                 <div id="military_container" class="hidden">
                     <label class="block mb-2 text-pink-200 font-semibold">خدمت سربازی:</label>
                     <select name="military_filter"
@@ -167,6 +206,7 @@
             </div>
         </form>
 
+        <!-- Loading Overlay -->
         <div id="loading-overlay"
             class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center z-50">
             <div class="text-center animate__animated animate__fadeIn">
@@ -175,6 +215,7 @@
             </div>
         </div>
 
+        <!-- Results -->
         {% if top_candidates %}
         <div class="mt-10 animate__animated animate__fadeIn">
             {% if summary_data %}
@@ -197,8 +238,11 @@
             <div class="overflow-x-auto rounded-lg border border-white/10">
                 <table class="min-w-[1200px] whitespace-nowrap text-sm text-gray-200">
                     <thead class="bg-white/10">
-                        <tr>{% for key in top_candidates[0].keys() %}<th class="px-4 py-2 text-right">{{ key }}</th>{%
-                            endfor %}</tr>
+                        <tr>
+                            {% for key in top_candidates[0].keys() %}
+                            <th class="px-4 py-2 text-right">{{ key }}</th>
+                            {% endfor %}
+                        </tr>
                     </thead>
                     <tbody class="divide-y divide-white/5">
                         {% for row in top_candidates %}
@@ -215,12 +259,15 @@
         {% endif %}
     </div>
 
+    <!-- Scripts -->
     <script>
+        // Particles
         particlesJS("particles-js", {
             "particles": {
                 "number": { "value": 100 }, "color": { "value": "#ec4899" },
                 "shape": { "type": "circle" }, "opacity": { "value": 0.3 },
-                "size": { "value": 3 }, "line_linked": { "enable": true, "distance": 140, "color": "#3b82f6", "opacity": 0.3, "width": 1 },
+                "size": { "value": 3 },
+                "line_linked": { "enable": true, "distance": 140, "color": "#3b82f6", "opacity": 0.3, "width": 1 },
                 "move": { "enable": true, "speed": 2 }
             },
             "interactivity": {
@@ -230,11 +277,12 @@
             "retina_detect": true
         });
 
+        // Loader
         const form = document.getElementById("file-upload");
         const overlay = document.getElementById("loading-overlay");
         form.addEventListener("submit", () => { overlay.classList.remove("hidden"); });
 
-        // Gender logic
+        // Gender → Military toggle
         const genderSelect = document.getElementById("gender_filter");
         const milContainer = document.getElementById("military_container");
         genderSelect.addEventListener("change", () => {
@@ -242,7 +290,100 @@
                 milContainer.classList.remove("hidden");
             } else {
                 milContainer.classList.add("hidden");
-                milContainer.querySelector("select").value = "همه";
+                const milSel = milContainer.querySelector("select");
+                if (milSel) milSel.value = "همه";
+            }
+        });
+
+        // --- Voice (fa-IR) + NLP autofill ---
+        const voiceBtn = document.getElementById("voiceBtn");
+        const voiceText = document.getElementById("voiceText");
+        const fillBtn = document.getElementById("fillFromVoice");
+
+        let recognition = null;
+        (function initSTT() {
+            try {
+                const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (!SR) return;
+                recognition = new SR();
+                recognition.lang = "fa-IR";
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
+
+                recognition.addEventListener("result", (e) => {
+                    const t = e.results[0][0]?.transcript || "";
+                    voiceText.value = (t || "").trim();
+                });
+                recognition.addEventListener("end", () => {
+                    voiceBtn.disabled = false;
+                    voiceBtn.textContent = "🎤 گفتار کارفرما";
+                });
+            } catch (e) { console.warn("SpeechRecognition init error:", e); }
+        })();
+
+        voiceBtn?.addEventListener("click", () => {
+            if (!recognition) {
+                alert("مرورگر شما از تشخیص گفتار پشتیبانی نمی‌کند. لطفاً متن را در کادر بالا تایپ کنید.");
+                return;
+            }
+            voiceBtn.disabled = true;
+            voiceBtn.textContent = "⏺️ در حال گوش دادن…";
+            recognition.start();
+        });
+
+        fillBtn.addEventListener("click", async () => {
+            const utter = (voiceText.value || "").trim();
+            if (!utter) {
+                alert("لطفاً ابتدا با میکروفن صحبت کنید یا متن نیازمندی را در کادر بالا بنویسید.");
+                return;
+            }
+            try {
+                const res = await fetch("/nlp/parse", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ utterance: utter }),
+                });
+                if (!res.ok) throw new Error("NLP parse failed");
+                const data = await res.json();
+
+                // Fill form
+                const setSelect = (name, val) => {
+                    const el = document.querySelector(`select[name="${name}"]`);
+                    if (el && val != null) {
+                        const opt = [...el.options].find(o => (o.value || o.text).toString() === val.toString());
+                        if (opt) el.value = opt.value;
+                    }
+                };
+
+                // Job description
+                const jd = document.querySelector('textarea[name="job_description"]');
+                if (jd) jd.value = data.job_description || utter;
+
+                // Must keywords (optional)
+                const mk = document.querySelector('input[name="must_keywords"]');
+                if (mk && data.must_keywords) {
+                    mk.value = Array.isArray(data.must_keywords) ? data.must_keywords.join(", ") : data.must_keywords;
+                }
+
+                setSelect("age_range", data.age_range || "any");
+                setSelect("exp_range", data.exp_range || "any");
+                setSelect("city", data.city || "any");
+                setSelect("gender_filter", data.gender_filter || "همه");
+
+                if (data.gender_filter === "مرد") {
+                    milContainer?.classList.remove("hidden");
+                    setSelect("military_filter", data.military_filter || "همه");
+                } else {
+                    milContainer?.classList.add("hidden");
+                }
+
+                setSelect("top_candidates", data.top_candidates);
+
+                fillBtn.textContent = "✅ فرم پر شد";
+                setTimeout(() => (fillBtn.textContent = "✨ پر کردن خودکار فرم"), 1200);
+            } catch (e) {
+                console.error(e);
+                alert("خطا در پردازش متن گفتاری. لطفاً دوباره تلاش کنید.");
             }
         });
     </script>
