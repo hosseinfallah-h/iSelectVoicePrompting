@@ -71,9 +71,7 @@
             resize: none;
             overflow-y: auto;
             min-height: 3.25rem;
-            /* comfy 2 lines */
             max-height: 40vh;
-            /* responsive cap (viewport-based) */
             line-height: 1.7;
             white-space: pre-wrap;
             word-break: break-word;
@@ -82,7 +80,6 @@
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
         }
 
-        /* Subtle desktop scrollbar */
         .voice-area::-webkit-scrollbar {
             width: 8px;
         }
@@ -102,9 +99,15 @@
     <div id="particles-js"></div>
 
     <div class="glass w-full max-w-5xl p-6 sm:p-10 animate__animated animate__fadeInUp">
-        <h1 class="text-3xl sm:text-4xl font-extrabold mb-8 text-center text-pink-400">
+        <h1 class="text-3xl sm:text-4xl font-extrabold mb-6 text-center text-pink-400">
             📊 I-SELECT – سامانه هوشمند جذب و استخدام
         </h1>
+
+        {% if error %}
+        <div class="mb-4 p-3 rounded-xl border border-red-400/40 bg-red-500/10 text-red-200">
+            ⚠️ {{ error }}
+        </div>
+        {% endif %}
 
         <!-- Voice Capture (responsive, polished) -->
         <section class="mb-6 space-y-2">
@@ -154,14 +157,30 @@
                 <input type="text" name="must_keywords" placeholder="مثلاً: PLC, نگهداری پیشگیرانه, برق صنعتی"
                     class="w-full p-3 rounded-xl bg-gray-900/60 text-white border border-white/10" />
                 <p class="hint mt-1">کلمات را با کاما جدا کنید. فقط رزومه‌هایی که به این نیازمندی‌ها می‌خورند وارد
-                    مرحلهٔ هوش‌مصنوعی می‌شوند.</p>
+                    مرحلهٔ
+                    هوش‌مصنوعی می‌شوند.</p>
             </div>
 
             <div class="grid md:grid-cols-2 gap-6">
                 <div>
                     <label class="block mb-2 text-pink-200 font-semibold">فایل Excel رزومه‌ها:</label>
-                    <input type="file" name="excel_file" accept=".xlsx,.xls" required class="w-full file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-pink-500 file:text-white hover:file:bg-pink-400
+                    <!-- NOTE: removed 'required' so default file can be used -->
+                    <input type="file" name="excel_file" accept=".xlsx,.xls" class="w-full file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-pink-500 file:text-white hover:file:bg-pink-400
                    bg-gray-900/60 text-gray-200 rounded-xl border border-white/10" />
+                    <div class="mt-2 text-xs">
+                        {% if default_exists %}
+                        <span
+                            class="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-200 border border-emerald-400/30">
+                            ✅ اگر فایل انتخاب نکنید، <b class="mx-1">resumes_isaco_fa_10000.xlsx</b> به‌صورت خودکار
+                            استفاده می‌شود.
+                        </span>
+                        {% else %}
+                        <span
+                            class="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/30">
+                            ⚠️ فایل پیش‌فرض یافت نشد. لطفاً فایل رزومه‌ها را انتخاب کنید.
+                        </span>
+                        {% endif %}
+                    </div>
                 </div>
 
                 <div>
@@ -346,14 +365,13 @@
         function autoGrow(el) {
             el.style.height = '0px';
             const cs = window.getComputedStyle(el);
-            const maxH = parseFloat(cs.maxHeight) || (window.innerHeight * 0.4); // fallback 40vh
+            const maxH = parseFloat(cs.maxHeight) || (window.innerHeight * 0.4);
             const newH = Math.min(el.scrollHeight + 2, maxH);
             el.style.height = newH + 'px';
-            el.scrollTop = el.scrollHeight; // show latest part
+            el.scrollTop = el.scrollHeight;
             if (charCount) charCount.textContent = (el.value.length.toLocaleString('fa-IR')) + ' کاراکتر';
         }
 
-        // Init + events
         autoGrow(voiceText);
         voiceText.addEventListener('input', () => autoGrow(voiceText));
         window.addEventListener('resize', () => autoGrow(voiceText), { passive: true });

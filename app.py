@@ -18,6 +18,9 @@ app.config["OUTPUT_FOLDER"] = "outputs"
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 os.makedirs(app.config["OUTPUT_FOLDER"], exist_ok=True)
 
+# Default Excel to use when none uploaded
+DEFAULT_EXCEL = os.path.join(app.config["UPLOAD_FOLDER"], "resumes_isaco_fa_10000.xlsx")
+
 # ------------------------------------------------
 # Helpers
 # ------------------------------------------------
@@ -390,54 +393,47 @@ def extract_json_block(text):
         raise ValueError("No JSON block found")
     return json.loads(m.group(0))
 
-# --- NEW: regex extraction that handles ranges AND single values for age/experience
+# Robust regex extractor (ranges + single values)
 def regex_extract_age_exp_city_gender_military(utter):
     s = normalize_digits(utter)
-    # Age range: "سن 25 تا 32" / "۲۵ تا ۳۲ سال"
+
+    # AGE
     age_lo = age_hi = None
     m = re.search(r"(?:سن\s*(?:بین)?\s*)?(\d{1,3})\s*(?:تا|-)\s*(\d{1,3})\s*(?:سال(?:ه)?)?", s)
     if m:
         age_lo, age_hi = int(m.group(1)), int(m.group(2))
     else:
-        # Single age: "28 ساله" / "سن 28" / "28 سال سن"
-        m = re.search(r"(?:سن\s*)?(\d{1,3})\s*(?:سال(?:ه)?|ساله)?\s*(?:سن)?", s)
+        m = re.search(r"(?:سن\s*)?(\d{1,3})\s*(?:سال(?:ه)?|ساله)\b", s)
         if m:
             v = int(m.group(1))
-            # try to avoid catching exp numbers: ensure there's "سن" or "ساله"
-            if re.search(r"(سن|ساله|سالِه)", s) or ("ساله" in s):
-                age_lo = age_hi = v
-            else:
-                # Heuristic: if "سابقه" appears near, treat as exp, not age
-                pass
+            age_lo = age_hi = v
 
-    # Experience range: "سابقه 3 تا 6" / "سابقه کاری ۳ تا ۶ سال"
+    # EXPERIENCE
     exp_lo = exp_hi = None
     m = re.search(r"(?:سابقه(?:\s*کاری)?|تجربه)\s*(?:حداقل|بیش از|کمتر از|حداکثر)?\s*(\d{1,2})\s*(?:تا|-)\s*(\d{1,2})\s*سال", s)
     if m:
         exp_lo, exp_hi = float(m.group(1)), float(m.group(2))
     else:
-        # Single experience: "۴ سال سابقه" / "سابقه 4 سال" / "تجربه 4 سال"
         m = re.search(r"(?:سابقه(?:\s*کاری)?|تجربه)\s*(?:حداقل|بیش از|کمتر از|حداکثر)?\s*(\d{1,2})\s*سال", s)
         if m:
             exp_lo = exp_hi = float(m.group(1))
         else:
-            # Pattern like "... 4 سال ..." with word سابقه right after
             m = re.search(r"(\d{1,2})\s*سال(?:ه)?\s*(?:سابقه(?:\s*کاری)?|تجربه)", s)
             if m:
                 exp_lo = exp_hi = float(m.group(1))
 
-    # City
+    # CITY
     city = "any"
     m = re.search(r"(?:در|توی)\s+([آ-یA-Za-z]+)", s)
     if m:
         city = m.group(1)
 
-    # Gender
+    # GENDER
     gender = "همه"
     if re.search(r"(خانم|زن)", s): gender = "زن"
     if re.search(r"(آقا|مرد)", s): gender = "مرد"
 
-    # Military
+    # MILITARY
     military = "همه"
     if re.search(r"(معاف|ندارد)", s): military = "ندارد"
     if re.search(r"(پایان خدمت|کارت|دارد)", s): military = "دارد"
@@ -473,7 +469,6 @@ def nlp_parse():
     user_text = f"متن کارفرما:\n{utter}"
 
     parsed = None
-    # 1) Try LLM
     try:
         resp = ollama.chat(
             model="gemma3:1b",
@@ -498,10 +493,9 @@ def nlp_parse():
     except Exception:
         parsed = None
 
-    # 2) Always run regex extractor, then fill missing/any from it
+    # Regex extractor (to fill gaps / fix misses)
     age_lo, age_hi, exp_lo, exp_hi, city_rx, gender_rx, military_rx = regex_extract_age_exp_city_gender_military(utter)
 
-    # If LLM failed, seed a default dict first
     if parsed is None:
         parsed = {
             "job_description": utter,
@@ -514,10 +508,9 @@ def nlp_parse():
             "top_candidates": None
         }
 
-    # Fill-in/override when LLM missed it
     if parsed.get("age_range", "any") == "any":
         parsed["age_range"] = map_age_bucket(age_lo, age_hi)
-    # Handle JSON numeric hints like {"experience_years": 4}
+
     exp_hint = None
     try:
         exp_hint = float(parsed.get("experience_years")) if parsed.get("experience_years") is not None else None
@@ -528,7 +521,6 @@ def nlp_parse():
     if parsed.get("exp_range","any") == "any":
         parsed["exp_range"] = map_exp_bucket(exp_lo, exp_hi)
 
-    # City/Gender/Military: prefer LLM but fix if empty/any and regex has something better
     if (not parsed.get("city")) or parsed.get("city") == "any":
         parsed["city"] = city_rx or "any"
     if parsed.get("gender_filter","همه") == "همه" and gender_rx != "همه":
@@ -555,6 +547,9 @@ def nlp_parse():
 @app.route("/", methods=["GET", "POST"])
 def index():
     top_candidates, output_filename, summary_data = None, None, None
+    default_exists = os.path.exists(DEFAULT_EXCEL)
+    error = None
+
     if request.method == "POST":
         job_description = request.form.get("job_description", "").strip()
         age_range = request.form.get("age_range", "همه")
@@ -569,12 +564,26 @@ def index():
         except:
             top_n = 10
 
+        # Uploaded file OR default file
+        used_filename = None
         file = request.files.get("excel_file")
-        if not file:
-            return render_template("index.html")
+        if file and file.filename:
+            path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
+            file.save(path)
+            used_filename = file.filename
+        else:
+            if default_exists:
+                path = DEFAULT_EXCEL
+                used_filename = os.path.basename(DEFAULT_EXCEL)
+            else:
+                error = "هیچ فایلی انتخاب نشد و فایل پیش‌فرض وجود ندارد."
+                return render_template("index.html",
+                                       top_candidates=None,
+                                       output_filename=None,
+                                       summary_data=None,
+                                       default_exists=default_exists,
+                                       error=error)
 
-        path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-        file.save(path)
         raw_df = pd.read_excel(path, engine="openpyxl")
         cleaned_df, cols = clean_dataframe(raw_df)
 
@@ -586,7 +595,7 @@ def index():
         if must_keywords:
             text_cols = get_textual_columns(filtered_df)
             filtered_df = filter_by_keywords(filtered_df, must_keywords, text_cols, min_mode="auto")
-            prefer_kw = True
+            prefer_kw = True  # nudge LLM to consider __kw_hits
 
         # Step 3: Gemma ranking (or fallback)
         ranked = query_gemma(filtered_df, job_description, top_n, prefer_kw=prefer_kw)
@@ -594,6 +603,7 @@ def index():
 
         # UI/Excel summary
         summary_data = {
+            "فایل استفاده‌شده": used_filename or "—",
             "توضیح شغل": job_description or "—",
             "رده سنی": age_range,
             "سابقه کار": exp_range,
@@ -609,10 +619,20 @@ def index():
         output_path = os.path.join(app.config["OUTPUT_FOLDER"], output_filename)
         save_with_summary(ranked, summary_data, output_path)
 
+        return render_template("index.html",
+                               top_candidates=top_candidates,
+                               output_filename=output_filename,
+                               summary_data=summary_data,
+                               default_exists=default_exists,
+                               error=error)
+
+    # GET
     return render_template("index.html",
                            top_candidates=top_candidates,
                            output_filename=output_filename,
-                           summary_data=summary_data)
+                           summary_data=summary_data,
+                           default_exists=default_exists,
+                           error=error)
 
 @app.route("/download/<path:filename>")
 def download(filename):
