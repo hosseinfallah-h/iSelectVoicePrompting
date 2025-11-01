@@ -29,10 +29,10 @@
 
         .glass {
             backdrop-filter: blur(25px) saturate(180%);
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, .06);
+            border: 1px solid rgba(255, 255, 255, .2);
             border-radius: 1.5rem;
-            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, .6);
         }
 
         .btn-grad {
@@ -46,7 +46,7 @@
         }
 
         .spinner {
-            border: 6px solid rgba(255, 255, 255, 0.2);
+            border: 6px solid rgba(255, 255, 255, .2);
             border-top: 6px solid #ec4899;
             border-radius: 50%;
             width: 60px;
@@ -65,6 +65,36 @@
             font-size: .8rem;
             color: #cbd5e1
         }
+
+        /* Voice textarea: responsive, clean */
+        .voice-area {
+            resize: none;
+            overflow-y: auto;
+            min-height: 3.25rem;
+            /* comfy 2 lines */
+            max-height: 40vh;
+            /* responsive cap (viewport-based) */
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06);
+        }
+
+        /* Subtle desktop scrollbar */
+        .voice-area::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .voice-area::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, .18);
+            border-radius: 999px;
+        }
+
+        .voice-area::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, .28);
+        }
     </style>
 </head>
 
@@ -76,26 +106,39 @@
             📊 I-SELECT – سامانه هوشمند جذب و استخدام
         </h1>
 
-        <!-- Voice Capture Row -->
-        <div class="mb-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <button type="button" id="voiceBtn"
-                class="btn-grad text-white px-6 py-2 rounded-full font-semibold flex items-center justify-center gap-2">
-                🎤 گفتار کارفرما
-            </button>
+        <!-- Voice Capture (responsive, polished) -->
+        <section class="mb-6 space-y-2">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <button id="voiceBtn" type="button"
+                    class="btn-grad text-white px-5 py-2 rounded-full font-semibold flex items-center justify-center gap-2 shrink-0">
+                    🎤 گفتار کارفرما
+                </button>
 
-            <input id="voiceText" type="text" dir="auto"
-                placeholder="اینجا آنچه گفتید ظاهر می‌شود… (مثال: «یه تعمیرکار ۲۵ تا ۳۲ سال، سابقه ۳ تا ۶، تهران»)"
-                class="flex-1 p-3 rounded-xl bg-gray-900/60 text-white border border-white/10" readonly />
+                <div class="flex-1">
+                    <label for="voiceText" class="sr-only">متن گفتار کارفرما</label>
+                    <textarea id="voiceText" dir="auto" rows="2"
+                        placeholder="مثال: «یه تعمیرکار ۲۵ تا ۳۲ سال، سابقه ۳ تا ۶، تهران؛ خدمت فرقی نمی‌کنه»"
+                        class="voice-area w-full rounded-2xl bg-gray-900/60 text-white/90 border border-white/10 focus:border-pink-500/50 focus:outline-none px-3 py-2 leading-relaxed placeholder:text-white/40"></textarea>
 
-            <button type="button" id="fillFromVoice"
-                class="px-5 py-2 rounded-full font-semibold bg-white/10 hover:bg-white/20 border border-white/10">
-                ✨ پر کردن خودکار فرم
-            </button>
-        </div>
-        <p class="hint mb-6">
-            نکته: اگر مرورگر شما از تشخیص گفتار پشتیبانی نمی‌کند، متن را در کادر بالا تایپ کنید و «پر کردن خودکار فرم»
-            را بزنید.
-        </p>
+                    <div class="mt-1 flex items-center justify-between text-xs text-gray-300/80">
+                        <span class="hint">اگر میکروفن پشتیبانی نمی‌شود، اینجا تایپ کنید و «پر کردن خودکار فرم» را
+                            بزنید.</span>
+                        <span id="charCount" class="hidden sm:inline">۰ کاراکتر</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 sm:flex-col sm:gap-2 sm:shrink-0">
+                    <button id="fillFromVoice" type="button"
+                        class="px-4 py-2 rounded-full font-semibold bg-white/10 hover:bg-white/20 border border-white/10">
+                        ✨ پر کردن خودکار فرم
+                    </button>
+                    <button id="clearVoice" type="button"
+                        class="px-4 py-2 rounded-full font-semibold bg-white/5 hover:bg-white/15 border border-white/10">
+                        🧹 پاک کردن
+                    </button>
+                </div>
+            </div>
+        </section>
 
         <!-- Main Form -->
         <form id="file-upload" method="post" enctype="multipart/form-data" action="/" class="space-y-6">
@@ -106,7 +149,6 @@
                     placeholder="مثلاً: تعمیرکار تجهیزات صنعتی با تجربه کار با PLC و نگهداری پیشگیرانه"></textarea>
             </div>
 
-            <!-- Optional: Must Keywords (hard requirements) -->
             <div>
                 <label class="block mb-2 text-pink-200 font-semibold">نیازمندی‌ها (کلمات کلیدی ضروری):</label>
                 <input type="text" name="must_keywords" placeholder="مثلاً: PLC, نگهداری پیشگیرانه, برق صنعتی"
@@ -118,9 +160,8 @@
             <div class="grid md:grid-cols-2 gap-6">
                 <div>
                     <label class="block mb-2 text-pink-200 font-semibold">فایل Excel رزومه‌ها:</label>
-                    <input type="file" name="excel_file" accept=".xlsx,.xls" required class="w-full file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0
-                        file:bg-pink-500 file:text-white hover:file:bg-pink-400
-                        bg-gray-900/60 text-gray-200 rounded-xl border border-white/10" />
+                    <input type="file" name="excel_file" accept=".xlsx,.xls" required class="w-full file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:bg-pink-500 file:text-white hover:file:bg-pink-400
+                   bg-gray-900/60 text-gray-200 rounded-xl border border-white/10" />
                 </div>
 
                 <div>
@@ -295,11 +336,29 @@
             }
         });
 
-        // --- Voice (fa-IR) + NLP autofill ---
+        // --- Voice (fa-IR) + NLP autofill (responsive) ---
         const voiceBtn = document.getElementById("voiceBtn");
         const voiceText = document.getElementById("voiceText");
         const fillBtn = document.getElementById("fillFromVoice");
+        const clearBtn = document.getElementById("clearVoice");
+        const charCount = document.getElementById("charCount");
 
+        function autoGrow(el) {
+            el.style.height = '0px';
+            const cs = window.getComputedStyle(el);
+            const maxH = parseFloat(cs.maxHeight) || (window.innerHeight * 0.4); // fallback 40vh
+            const newH = Math.min(el.scrollHeight + 2, maxH);
+            el.style.height = newH + 'px';
+            el.scrollTop = el.scrollHeight; // show latest part
+            if (charCount) charCount.textContent = (el.value.length.toLocaleString('fa-IR')) + ' کاراکتر';
+        }
+
+        // Init + events
+        autoGrow(voiceText);
+        voiceText.addEventListener('input', () => autoGrow(voiceText));
+        window.addEventListener('resize', () => autoGrow(voiceText), { passive: true });
+
+        // STT init
         let recognition = null;
         (function initSTT() {
             try {
@@ -313,7 +372,9 @@
                 recognition.addEventListener("result", (e) => {
                     const t = e.results[0][0]?.transcript || "";
                     voiceText.value = (t || "").trim();
+                    requestAnimationFrame(() => autoGrow(voiceText));
                 });
+
                 recognition.addEventListener("end", () => {
                     voiceBtn.disabled = false;
                     voiceBtn.textContent = "🎤 گفتار کارفرما";
@@ -331,7 +392,13 @@
             recognition.start();
         });
 
-        fillBtn.addEventListener("click", async () => {
+        clearBtn?.addEventListener('click', () => {
+            voiceText.value = '';
+            autoGrow(voiceText);
+            voiceText.focus();
+        });
+
+        fillBtn?.addEventListener("click", async () => {
             const utter = (voiceText.value || "").trim();
             if (!utter) {
                 alert("لطفاً ابتدا با میکروفن صحبت کنید یا متن نیازمندی را در کادر بالا بنویسید.");
@@ -346,7 +413,6 @@
                 if (!res.ok) throw new Error("NLP parse failed");
                 const data = await res.json();
 
-                // Fill form
                 const setSelect = (name, val) => {
                     const el = document.querySelector(`select[name="${name}"]`);
                     if (el && val != null) {
@@ -355,11 +421,9 @@
                     }
                 };
 
-                // Job description
                 const jd = document.querySelector('textarea[name="job_description"]');
                 if (jd) jd.value = data.job_description || utter;
 
-                // Must keywords (optional)
                 const mk = document.querySelector('input[name="must_keywords"]');
                 if (mk && data.must_keywords) {
                     mk.value = Array.isArray(data.must_keywords) ? data.must_keywords.join(", ") : data.must_keywords;
@@ -376,7 +440,6 @@
                 } else {
                     milContainer?.classList.add("hidden");
                 }
-
                 setSelect("top_candidates", data.top_candidates);
 
                 fillBtn.textContent = "✅ فرم پر شد";
